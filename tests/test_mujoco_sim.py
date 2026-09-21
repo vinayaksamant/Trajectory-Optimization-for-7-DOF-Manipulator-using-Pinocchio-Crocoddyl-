@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from panda_trajopt.mujoco_sim import ARM_ACTUATOR_NAMES, load_panda_simulation
+from panda_trajopt.mujoco_sim import ARM_ACTUATOR_NAMES, PANDA_HOME, load_panda_simulation
 
 
 def test_panda_arm_uses_seven_direct_torque_actuators() -> None:
@@ -33,3 +34,24 @@ def test_headless_simulation_remains_finite_with_gravity_compensation() -> None:
     assert np.all(np.isfinite(simulation.data.qpos))
     assert np.all(np.isfinite(simulation.data.qvel))
     assert np.allclose(applied, torque)
+
+
+def test_arm_state_round_trip_keeps_gripper_separate() -> None:
+    simulation = load_panda_simulation()
+    gripper_before = simulation.data.qpos[7:].copy()
+    velocity = np.linspace(-0.3, 0.3, 7)
+
+    simulation.set_arm_state(PANDA_HOME, velocity)
+
+    assert np.allclose(simulation.arm_configuration, PANDA_HOME)
+    assert np.allclose(simulation.arm_velocity, velocity)
+    assert np.allclose(simulation.data.qpos[7:], gripper_before)
+
+
+def test_arm_state_rejects_invalid_shape_and_limits() -> None:
+    simulation = load_panda_simulation()
+
+    with pytest.raises(ValueError, match="shapes"):
+        simulation.set_arm_state(np.zeros(6), np.zeros(7))
+    with pytest.raises(ValueError, match="joint limits"):
+        simulation.set_arm_state(np.full(7, 100.0), np.zeros(7))

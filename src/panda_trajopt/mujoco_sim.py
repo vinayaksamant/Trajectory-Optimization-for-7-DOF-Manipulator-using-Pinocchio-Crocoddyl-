@@ -10,6 +10,7 @@ import numpy as np
 
 ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 8))
 ARM_ACTUATOR_NAMES = tuple(f"joint{index}_torque" for index in range(1, 8))
+PANDA_HOME = np.array([0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853])
 
 
 def default_model_cache() -> Path:
@@ -27,6 +28,8 @@ class PandaSimulation:
 
     model: object
     data: object
+    arm_joint_ids: np.ndarray
+    arm_qpos_ids: np.ndarray
     arm_dof_ids: np.ndarray
     arm_actuator_ids: np.ndarray
 
@@ -38,6 +41,35 @@ class PandaSimulation:
             raise ValueError("The Panda model does not contain the 'home' keyframe")
         mujoco.mj_resetDataKeyframe(self.model, self.data, home_id)
         self.data.ctrl[self.arm_actuator_ids] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+
+    @property
+    def arm_configuration(self) -> np.ndarray:
+        """Copy the seven arm joint positions in joint1-to-joint7 order."""
+        return self.data.qpos[self.arm_qpos_ids].copy()
+
+    @property
+    def arm_velocity(self) -> np.ndarray:
+        """Copy the seven arm velocities in joint1-to-joint7 order."""
+        return self.data.qvel[self.arm_dof_ids].copy()
+
+    def set_arm_state(self, configuration: Sequence[float], velocity: Sequence[float]) -> None:
+        """Set the seven-joint state while leaving the gripper state unchanged."""
+        import mujoco
+
+        q = np.asarray(configuration, dtype=float)
+        v = np.asarray(velocity, dtype=float)
+        if q.shape != (7,) or v.shape != (7,):
+            raise ValueError(f"Expected q and v shapes (7,), got q={q.shape}, v={v.shape}")
+        if not np.all(np.isfinite(q)) or not np.all(np.isfinite(v)):
+            raise ValueError("The arm state must contain only finite values")
+
+        limits = self.model.jnt_range[self.arm_joint_ids]
+        if np.any(q < limits[:, 0]) or np.any(q > limits[:, 1]):
+            raise ValueError("Arm configuration is outside the Panda joint limits")
+
+        self.data.qpos[self.arm_qpos_ids] = q
+        self.data.qvel[self.arm_dof_ids] = v
         mujoco.mj_forward(self.model, self.data)
 
     def set_arm_torques(self, torques: Sequence[float]) -> np.ndarray:
@@ -115,6 +147,9 @@ def load_panda_simulation(cache_dir: str | Path | None = None) -> PandaSimulatio
         raise ValueError("The compiled Panda model is missing an arm joint or actuator")
 
     arm_dof_ids = model.jnt_dofadr[arm_joint_ids].copy()
-    simulation = PandaSimulation(model, data, arm_dof_ids, arm_actuator_ids)
+    arm_qpos_ids = model.jnt_qposadr[arm_joint_ids].copy()
+    simulation = PandaSimulation(
+        model, data, arm_joint_ids, arm_qpos_ids, arm_dof_ids, arm_actuator_ids
+    )
     simulation.reset_home()
     return simulation

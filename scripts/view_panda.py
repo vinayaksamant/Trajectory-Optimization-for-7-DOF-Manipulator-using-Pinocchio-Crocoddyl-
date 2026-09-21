@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from contextlib import nullcontext
 
 from panda_trajopt.mujoco_sim import load_panda_simulation
 
@@ -39,14 +40,15 @@ def run_simulation(duration: float | None, compensate_gravity: bool, headless: b
     print("Arm controls 0..6 are direct joint torques; control 7 operates the gripper.")
     print("Close the viewer window to stop.")
 
-    viewer_context = None
-    if not headless:
+    if headless:
+        viewer_manager = nullcontext(None)
+    else:
         import mujoco.viewer
 
-        viewer_context = mujoco.viewer.launch_passive(model, data)
+        viewer_manager = mujoco.viewer.launch_passive(model, data)
 
     start_sim_time = data.time
-    try:
+    with viewer_manager as viewer_context:
         while (viewer_context is None or viewer_context.is_running()) and (
             duration is None or data.time - start_sim_time < duration
         ):
@@ -63,9 +65,6 @@ def run_simulation(duration: float | None, compensate_gravity: bool, headless: b
             remaining = model.opt.timestep - (time.monotonic() - step_started)
             if remaining > 0:
                 time.sleep(remaining)
-    finally:
-        if viewer_context is not None:
-            viewer_context.close()
 
 
 def main() -> None:
