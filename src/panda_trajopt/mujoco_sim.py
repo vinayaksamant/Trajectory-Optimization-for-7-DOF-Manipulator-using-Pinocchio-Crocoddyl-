@@ -11,11 +11,51 @@ import numpy as np
 ARM_JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 8))
 ARM_ACTUATOR_NAMES = tuple(f"joint{index}_torque" for index in range(1, 8))
 PANDA_HOME = np.array([0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853])
+TABLE_HEIGHT = 0.75
+TABLE_TOP_HALF_SIZE = np.array([0.65, 0.45, 0.03])
+TABLE_LEG_HALF_WIDTH = 0.035
 
 
 def default_model_cache() -> Path:
     """Return the project-local cache populated by setup_environment.sh."""
     return Path(__file__).resolve().parents[2] / ".cache" / "mujoco_menagerie"
+
+
+def _add_table(spec: object) -> None:
+    """Place a simple fixed table below the unchanged Panda base frame."""
+    import mujoco
+
+    floor = spec.geom("floor")
+    if floor is None:
+        raise ValueError("The Menagerie scene does not contain the expected floor")
+    floor.pos = [0.0, 0.0, -TABLE_HEIGHT]
+
+    top_half_height = float(TABLE_TOP_HALF_SIZE[2])
+    spec.worldbody.add_geom(
+        name="table_top",
+        type=mujoco.mjtGeom.mjGEOM_BOX,
+        pos=[0.0, 0.0, -top_half_height],
+        size=TABLE_TOP_HALF_SIZE,
+        rgba=[0.45, 0.25, 0.10, 1.0],
+        friction=[0.8, 0.02, 0.001],
+    )
+
+    leg_half_height = (TABLE_HEIGHT - 2.0 * top_half_height) / 2.0
+    leg_center_z = -(2.0 * top_half_height + leg_half_height)
+    leg_x = float(TABLE_TOP_HALF_SIZE[0] - 0.10)
+    leg_y = float(TABLE_TOP_HALF_SIZE[1] - 0.10)
+    for index, (x_position, y_position) in enumerate(
+        ((leg_x, leg_y), (leg_x, -leg_y), (-leg_x, leg_y), (-leg_x, -leg_y)),
+        start=1,
+    ):
+        spec.worldbody.add_geom(
+            name=f"table_leg_{index}",
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            pos=[x_position, y_position, leg_center_z],
+            size=[TABLE_LEG_HALF_WIDTH, TABLE_LEG_HALF_WIDTH, leg_half_height],
+            rgba=[0.28, 0.14, 0.06, 1.0],
+            friction=[0.8, 0.02, 0.001],
+        )
 
 
 @dataclass
@@ -108,6 +148,7 @@ def load_panda_simulation(cache_dir: str | Path | None = None) -> PandaSimulatio
 
     cache = menagerie.Cache(dir=cache_dir or default_model_cache())
     spec = menagerie.get("franka_emika_panda").spec(cache=cache)
+    _add_table(spec)
 
     if len(spec.actuators) < 8:
         raise ValueError("Expected seven arm actuators and one gripper actuator")

@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from panda_trajopt.mujoco_sim import ARM_ACTUATOR_NAMES, PANDA_HOME, load_panda_simulation
+from panda_trajopt.mujoco_sim import (
+    ARM_ACTUATOR_NAMES,
+    PANDA_HOME,
+    TABLE_HEIGHT,
+    load_panda_simulation,
+)
 
 
 def test_panda_arm_uses_seven_direct_torque_actuators() -> None:
@@ -21,6 +26,20 @@ def test_panda_arm_uses_seven_direct_torque_actuators() -> None:
         assert simulation.model.actuator_gaintype[actuator_id] == mujoco.mjtGain.mjGAIN_FIXED
         assert simulation.model.actuator_biastype[actuator_id] == mujoco.mjtBias.mjBIAS_NONE
         assert simulation.model.actuator_gainprm[actuator_id, 0] == 1.0
+
+
+def test_panda_is_mounted_on_table_without_moving_its_base_frame() -> None:
+    import mujoco
+
+    simulation = load_panda_simulation()
+    table_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_GEOM, "table_top")
+    floor_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_GEOM, "floor")
+    base_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_BODY, "link0")
+
+    assert table_id >= 0
+    assert simulation.model.geom_pos[table_id, 2] + simulation.model.geom_size[table_id, 2] == 0
+    assert simulation.model.geom_pos[floor_id, 2] == -TABLE_HEIGHT
+    assert np.allclose(simulation.model.body_pos[base_id], np.zeros(3))
 
 
 def test_headless_simulation_remains_finite_with_gravity_compensation() -> None:

@@ -49,6 +49,12 @@ def run_simulation(duration: float | None, compensate_gravity: bool, headless: b
 
     start_sim_time = data.time
     with viewer_manager as viewer_context:
+        if viewer_context is not None:
+            viewer_context.cam.lookat[:] = [0.0, 0.0, 0.35]
+            viewer_context.cam.distance = 2.2
+            viewer_context.cam.azimuth = 135.0
+            viewer_context.cam.elevation = -20.0
+
         while (viewer_context is None or viewer_context.is_running()) and (
             duration is None or data.time - start_sim_time < duration
         ):
