@@ -15,8 +15,8 @@ dependencies = [
 
 [project.optional-dependencies]
 robotics = [
-  "pin>=3.0",
-  "crocoddyl>=3.0",
+  "pin>=4.0,<4.1",
+  "crocoddyl>=3.2.1,<3.3",
   "example-robot-data>=4.0",
 ]
 simulation = [
@@ -37,4 +37,3 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-

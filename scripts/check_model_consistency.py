@@ -23,8 +23,8 @@ def main() -> None:
 
     report = compare_pinocchio_and_mujoco(panda, simulation, PANDA_HOME)
     print("\nConsistency errors at the shared home pose:")
-    print(f"  hand position:    {report.hand_position_error_m:.3e} m")
-    print(f"  hand orientation: {report.hand_orientation_error_rad:.3e} rad")
+    print(f"  grasp position:   {report.grasp_center_position_error_m:.3e} m")
+    print(f"  grasp orientation:{report.grasp_center_orientation_error_rad: .3e} rad")
     print(f"  gravity torque:   {report.gravity_max_error_nm:.3e} N m")
     print(f"  joint limits:     {report.joint_limit_max_error_rad:.3e} rad")
     report.validate()

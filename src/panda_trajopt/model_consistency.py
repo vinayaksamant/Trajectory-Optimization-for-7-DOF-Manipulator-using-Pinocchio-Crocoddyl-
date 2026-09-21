@@ -12,8 +12,8 @@ from panda_trajopt.mujoco_sim import PandaSimulation
 
 @dataclass(frozen=True)
 class ModelConsistencyReport:
-    hand_position_error_m: float
-    hand_orientation_error_rad: float
+    grasp_center_position_error_m: float
+    grasp_center_orientation_error_rad: float
     gravity_max_error_nm: float
     joint_limit_max_error_rad: float
 
@@ -25,9 +25,13 @@ class ModelConsistencyReport:
         joint_limit_tolerance_rad: float = 1e-8,
     ) -> None:
         checks = {
-            "hand position": (self.hand_position_error_m, position_tolerance_m, "m"),
-            "hand orientation": (
-                self.hand_orientation_error_rad,
+            "grasp-center position": (
+                self.grasp_center_position_error_m,
+                position_tolerance_m,
+                "m",
+            ),
+            "grasp-center orientation": (
+                self.grasp_center_orientation_error_rad,
                 orientation_tolerance_rad,
                 "rad",
             ),
@@ -73,11 +77,13 @@ def compare_pinocchio_and_mujoco(
     pin.updateFramePlacements(panda.model, pin_data)
     pin_hand = pin_data.oMf[panda.end_effector_frame_id]
 
-    mujoco_hand_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_BODY, "hand")
-    if mujoco_hand_id < 0:
-        raise ValueError("The MuJoCo Panda model does not contain the 'hand' body")
-    mujoco_hand_position = simulation.data.xpos[mujoco_hand_id]
-    mujoco_hand_rotation = simulation.data.xmat[mujoco_hand_id].reshape(3, 3)
+    mujoco_grasp_center_id = mujoco.mj_name2id(
+        simulation.model, mujoco.mjtObj.mjOBJ_SITE, "grasp_center"
+    )
+    if mujoco_grasp_center_id < 0:
+        raise ValueError("The MuJoCo Panda model does not contain the grasp-center site")
+    mujoco_hand_position = simulation.data.site_xpos[mujoco_grasp_center_id]
+    mujoco_hand_rotation = simulation.data.site_xmat[mujoco_grasp_center_id].reshape(3, 3)
 
     pin_gravity = pin.computeGeneralizedGravity(panda.model, pin_data, q)
     mujoco_gravity = simulation.gravity_compensation_torques()
@@ -88,8 +94,12 @@ def compare_pinocchio_and_mujoco(
     )
 
     return ModelConsistencyReport(
-        hand_position_error_m=float(np.linalg.norm(pin_hand.translation - mujoco_hand_position)),
-        hand_orientation_error_rad=_rotation_error_angle(pin_hand.rotation, mujoco_hand_rotation),
+        grasp_center_position_error_m=float(
+            np.linalg.norm(pin_hand.translation - mujoco_hand_position)
+        ),
+        grasp_center_orientation_error_rad=_rotation_error_angle(
+            pin_hand.rotation, mujoco_hand_rotation
+        ),
         gravity_max_error_nm=float(np.max(np.abs(pin_gravity - mujoco_gravity))),
         joint_limit_max_error_rad=float(np.max(np.abs(pin_joint_limits - mujoco_joint_limits))),
     )

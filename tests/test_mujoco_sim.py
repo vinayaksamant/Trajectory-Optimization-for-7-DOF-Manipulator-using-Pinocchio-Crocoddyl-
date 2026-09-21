@@ -3,6 +3,7 @@ import pytest
 
 from panda_trajopt.mujoco_sim import (
     ARM_ACTUATOR_NAMES,
+    GRASP_CENTER_FROM_HAND,
     PANDA_HOME,
     TABLE_HEIGHT,
     load_panda_simulation,
@@ -40,6 +41,18 @@ def test_panda_is_mounted_on_table_without_moving_its_base_frame() -> None:
     assert simulation.model.geom_pos[table_id, 2] + simulation.model.geom_size[table_id, 2] == 0
     assert simulation.model.geom_pos[floor_id, 2] == -TABLE_HEIGHT
     assert np.allclose(simulation.model.body_pos[base_id], np.zeros(3))
+
+
+def test_grasp_center_site_is_fixed_between_fingertips() -> None:
+    import mujoco
+
+    simulation = load_panda_simulation()
+    site_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_SITE, "grasp_center")
+    hand_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_BODY, "hand")
+
+    assert site_id >= 0
+    assert simulation.model.site_bodyid[site_id] == hand_id
+    assert np.allclose(simulation.model.site_pos[site_id], GRASP_CENTER_FROM_HAND)
 
 
 def test_headless_simulation_remains_finite_with_gravity_compensation() -> None:

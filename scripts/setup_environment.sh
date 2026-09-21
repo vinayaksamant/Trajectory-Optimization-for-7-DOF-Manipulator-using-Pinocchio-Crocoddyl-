@@ -5,8 +5,9 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_PATH="${PROJECT_ROOT}/.venv"
 MODEL_CACHE_PATH="${PROJECT_ROOT}/.cache/mujoco_menagerie"
 
-# Avoid leaking ROS/system Python packages into this project's environment.
+# Avoid leaking ROS/system Python packages and native libraries into this project.
 unset PYTHONPATH
+unset LD_LIBRARY_PATH
 
 python3 -m venv "${VENV_PATH}"
 "${VENV_PATH}/bin/python" -m pip install --upgrade pip

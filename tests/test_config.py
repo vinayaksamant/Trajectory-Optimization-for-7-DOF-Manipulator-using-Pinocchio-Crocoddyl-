@@ -16,6 +16,8 @@ def test_default_config_describes_seven_dof_arm() -> None:
         "panda_finger_joint1",
         "panda_finger_joint2",
     )
+    assert config.robot.end_effector_frame == "panda_hand_tcp"
+    assert config.robot.torque_limits == (87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0)
     assert config.trajectory.duration == pytest.approx(2.0)
 
 

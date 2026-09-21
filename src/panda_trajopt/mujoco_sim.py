@@ -14,6 +14,7 @@ PANDA_HOME = np.array([0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853])
 TABLE_HEIGHT = 0.75
 TABLE_TOP_HALF_SIZE = np.array([0.65, 0.45, 0.03])
 TABLE_LEG_HALF_WIDTH = 0.035
+GRASP_CENTER_FROM_HAND = np.array([0.0, 0.0, 0.1034])
 
 
 def default_model_cache() -> Path:
@@ -56,6 +57,47 @@ def _add_table(spec: object) -> None:
             rgba=[0.28, 0.14, 0.06, 1.0],
             friction=[0.8, 0.02, 0.001],
         )
+
+
+def _add_target_marker(
+    spec: object,
+    target_position: Sequence[float],
+    target_rotation: np.ndarray | None = None,
+) -> None:
+    """Add a non-colliding marker for the Cartesian pose target."""
+    import mujoco
+
+    position = np.asarray(target_position, dtype=float)
+    if position.shape != (3,) or not np.all(np.isfinite(position)):
+        raise ValueError("target_position must contain three finite values")
+    rotation = np.eye(3) if target_rotation is None else np.asarray(target_rotation, dtype=float)
+    if rotation.shape != (3, 3) or not np.all(np.isfinite(rotation)):
+        raise ValueError("target_rotation must be a finite 3-by-3 rotation matrix")
+    quaternion = np.empty(4)
+    mujoco.mju_mat2Quat(quaternion, rotation.reshape(-1))
+    spec.worldbody.add_geom(
+        name="reaching_target",
+        type=mujoco.mjtGeom.mjGEOM_BOX,
+        pos=position,
+        quat=quaternion,
+        size=[0.04, 0.012, 0.006],
+        rgba=[0.1, 0.9, 0.2, 0.65],
+        contype=0,
+        conaffinity=0,
+    )
+
+
+def _add_grasp_center_site(spec: object) -> None:
+    """Add the tool-center point midway between the Panda fingertip pads."""
+    hand = spec.body("hand")
+    if hand is None:
+        raise ValueError("The Menagerie Panda model does not contain the 'hand' body")
+    hand.add_site(
+        name="grasp_center",
+        pos=GRASP_CENTER_FROM_HAND,
+        size=[0.008],
+        rgba=[0.1, 0.4, 1.0, 0.8],
+    )
 
 
 @dataclass
@@ -136,7 +178,11 @@ class PandaSimulation:
         mujoco.mj_step(self.model, self.data)
 
 
-def load_panda_simulation(cache_dir: str | Path | None = None) -> PandaSimulation:
+def load_panda_simulation(
+    cache_dir: str | Path | None = None,
+    target_position: Sequence[float] | None = None,
+    target_rotation: np.ndarray | None = None,
+) -> PandaSimulation:
     """Load the official Menagerie scene and convert its arm to torque control."""
     try:
         import mujoco
@@ -149,6 +195,11 @@ def load_panda_simulation(cache_dir: str | Path | None = None) -> PandaSimulatio
     cache = menagerie.Cache(dir=cache_dir or default_model_cache())
     spec = menagerie.get("franka_emika_panda").spec(cache=cache)
     _add_table(spec)
+    _add_grasp_center_site(spec)
+    if target_position is not None:
+        _add_target_marker(spec, target_position, target_rotation)
+    elif target_rotation is not None:
+        raise ValueError("target_rotation requires target_position")
 
     if len(spec.actuators) < 8:
         raise ValueError("Expected seven arm actuators and one gripper actuator")
