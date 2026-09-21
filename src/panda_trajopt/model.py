@@ -50,9 +50,7 @@ def load_panda_arm(config: RobotConfig) -> PandaModel:
     )
     collision_model, visual_model = geometry_models
 
-    actual_arm_joints = tuple(
-        name for name in config.arm_joint_names if model.existJointName(name)
-    )
+    actual_arm_joints = tuple(name for name in config.arm_joint_names if model.existJointName(name))
     if actual_arm_joints != config.arm_joint_names or model.nq != 7 or model.nv != 7:
         raise ValueError(
             "The reduced model is not the expected 7-DOF Panda arm: "
@@ -72,4 +70,3 @@ def load_panda_arm(config: RobotConfig) -> PandaModel:
         visual_model=visual_model,
         end_effector_frame_id=model.getFrameId(config.end_effector_frame),
     )
-

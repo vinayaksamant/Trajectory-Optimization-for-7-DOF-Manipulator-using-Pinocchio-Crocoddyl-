@@ -5,7 +5,6 @@ import yaml
 
 from panda_trajopt.config import load_config
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -28,4 +27,3 @@ def test_config_rejects_wrong_arm_joint_count(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="must contain 7 joints"):
         load_config(config_path)
-

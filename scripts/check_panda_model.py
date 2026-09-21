@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Load the Panda and print facts we need before implementing optimization."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from panda_trajopt.config import load_config
 from panda_trajopt.model import load_panda_arm

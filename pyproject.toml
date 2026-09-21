@@ -19,6 +19,10 @@ robotics = [
   "crocoddyl>=3.0",
   "example-robot-data>=4.0",
 ]
+simulation = [
+  "mujoco>=3.3",
+  "mujoco-menagerie>=2026.9.0",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",

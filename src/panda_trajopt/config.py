@@ -59,9 +59,7 @@ def load_config(path: str | Path) -> ProjectConfig:
 
     arm_joint_names = tuple(robot["arm_joint_names"])
     if len(arm_joint_names) != 7:
-        raise ValueError(
-            f"The Panda arm must contain 7 joints, got {len(arm_joint_names)}"
-        )
+        raise ValueError(f"The Panda arm must contain 7 joints, got {len(arm_joint_names)}")
 
     horizon_steps = int(trajectory["horizon_steps"])
     if horizon_steps <= 0:
@@ -84,4 +82,3 @@ def load_config(path: str | Path) -> ProjectConfig:
             control_regularization=_positive(costs, "control_regularization"),
         ),
     )
-
