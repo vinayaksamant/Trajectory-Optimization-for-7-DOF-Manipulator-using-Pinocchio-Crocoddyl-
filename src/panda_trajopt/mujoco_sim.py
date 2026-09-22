@@ -100,6 +100,26 @@ def _add_grasp_center_site(spec: object) -> None:
     )
 
 
+def _add_obstacle(spec: object, obstacle_position: Sequence[float], obstacle_radius: float) -> None:
+    """Add the spherical obstacle used by the Crocoddyl reaching cost."""
+    import mujoco
+
+    position = np.asarray(obstacle_position, dtype=float)
+    if position.shape != (3,) or not np.all(np.isfinite(position)):
+        raise ValueError("obstacle_position must contain three finite values")
+    if not np.isfinite(obstacle_radius) or obstacle_radius <= 0:
+        raise ValueError("obstacle_radius must be positive")
+    spec.worldbody.add_geom(
+        name="reaching_obstacle",
+        type=mujoco.mjtGeom.mjGEOM_SPHERE,
+        pos=position,
+        size=[obstacle_radius],
+        rgba=[0.95, 0.25, 0.05, 0.85],
+        contype=0,
+        conaffinity=0,
+    )
+
+
 @dataclass
 class PandaSimulation:
     """Compiled Panda scene and its mutable MuJoCo state.
@@ -172,6 +192,30 @@ class PandaSimulation:
         mujoco.mj_forward(self.model, self.data)
         return self.data.qfrc_bias[self.arm_dof_ids].copy()
 
+    def minimum_robot_obstacle_distance(self) -> float:
+        """Return exact signed distance from any robot geom to the obstacle."""
+        import mujoco
+
+        obstacle_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "reaching_obstacle")
+        if obstacle_id < 0:
+            raise ValueError("The MuJoCo scene does not contain the reaching obstacle")
+        robot_geom_ids = np.flatnonzero(self.model.geom_bodyid != 0)
+        if robot_geom_ids.size == 0:
+            raise ValueError("The MuJoCo scene does not contain robot collision geometry")
+        return float(
+            min(
+                mujoco.mj_geomDistance(
+                    self.model,
+                    self.data,
+                    int(geom_id),
+                    obstacle_id,
+                    10.0,
+                    None,
+                )
+                for geom_id in robot_geom_ids
+            )
+        )
+
     def step(self) -> None:
         import mujoco
 
@@ -182,6 +226,8 @@ def load_panda_simulation(
     cache_dir: str | Path | None = None,
     target_position: Sequence[float] | None = None,
     target_rotation: np.ndarray | None = None,
+    obstacle_position: Sequence[float] | None = None,
+    obstacle_radius: float | None = None,
 ) -> PandaSimulation:
     """Load the official Menagerie scene and convert its arm to torque control."""
     try:
@@ -200,6 +246,10 @@ def load_panda_simulation(
         _add_target_marker(spec, target_position, target_rotation)
     elif target_rotation is not None:
         raise ValueError("target_rotation requires target_position")
+    if obstacle_position is not None and obstacle_radius is not None:
+        _add_obstacle(spec, obstacle_position, obstacle_radius)
+    elif obstacle_position is not None or obstacle_radius is not None:
+        raise ValueError("obstacle_position and obstacle_radius must be provided together")
 
     if len(spec.actuators) < 8:
         raise ValueError("Expected seven arm actuators and one gripper actuator")

@@ -11,6 +11,7 @@ robot:
   locked_joint_names:
     - panda_finger_joint1
     - panda_finger_joint2
+  locked_joint_positions: [0.04, 0.04]
   end_effector_frame: panda_hand_tcp
   torque_limits:
     - 87.0
@@ -34,12 +35,19 @@ costs:
   terminal_state_regularization: 10.0
   control_regularization: 0.0001
   joint_limits: 10000.0
+  obstacle_avoidance: 10000.0
 
 reaching:
   target_offset: [-0.08, 0.08, 0.08]
   target_orientation_rpy: [0.0, 0.0, 0.0]
   max_iterations: 100
-  stopping_threshold: 1.0e-8
+  stopping_threshold: 1.0e-3
   playback_settle_time: 0.5
   playback_position_gain: 60.0
   playback_velocity_gain: 12.0
+
+obstacle:
+  center_offset_from_start: [-0.052, 0.052, 0.052]
+  radius: 0.02
+  safety_margin: 0.005
+  soft_constraint_buffer: 0.006

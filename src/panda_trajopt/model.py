@@ -42,6 +42,8 @@ def load_panda_arm(config: RobotConfig) -> PandaModel:
         raise ValueError(f"Cannot lock missing joints {missing}. Available joints: {available}")
 
     locked_ids = [model.getJointId(name) for name in config.locked_joint_names]
+    for joint_id, position in zip(locked_ids, config.locked_joint_positions, strict=True):
+        q_reference[model.idx_qs[joint_id]] = position
     model, geometry_models = pin.buildReducedModel(
         model,
         [robot.collision_model, robot.visual_model],

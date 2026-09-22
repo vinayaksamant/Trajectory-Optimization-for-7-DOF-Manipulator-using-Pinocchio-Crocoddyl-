@@ -2,8 +2,10 @@ from pathlib import Path
 
 import numpy as np
 
+from panda_trajopt.collision import minimum_arm_obstacle_distance
 from panda_trajopt.config import load_config
 from panda_trajopt.model import load_panda_arm
+from panda_trajopt.mujoco_sim import PANDA_HOME
 from panda_trajopt.reaching import solve_reaching_problem
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,3 +45,17 @@ def test_box_fddp_reaching_solution_is_valid() -> None:
     assert solution.feedback_gains.shape == (config.trajectory.horizon_steps, 7, 14)
     assert np.allclose(solution.target_rotation, solution.initial_rotation)
     assert solution.final_orientation_error < 1e-3
+    assert solution.minimum_arm_obstacle_clearance >= -1e-3
+    assert solution.minimum_arm_obstacle_distance >= config.obstacle.safety_margin - 1e-3
+    assert solution.closest_collision_geometry.startswith("panda_")
+
+    direct_path_distances = [
+        minimum_arm_obstacle_distance(
+            panda,
+            (1.0 - fraction) * PANDA_HOME + fraction * solution.states[-1, :7],
+            solution.obstacle_center,
+            solution.obstacle_radius,
+        ).distance
+        for fraction in np.linspace(0.0, 1.0, 21)
+    ]
+    assert min(direct_path_distances) < 0.0

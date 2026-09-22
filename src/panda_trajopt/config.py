@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ class RobotConfig:
     name: str
     arm_joint_names: tuple[str, ...]
     locked_joint_names: tuple[str, ...]
+    locked_joint_positions: tuple[float, ...]
     end_effector_frame: str
     torque_limits: tuple[float, ...]
 
@@ -38,6 +40,7 @@ class CostConfig:
     terminal_state_regularization: float
     control_regularization: float
     joint_limits: float
+    obstacle_avoidance: float
 
 
 @dataclass(frozen=True)
@@ -52,16 +55,29 @@ class ReachingConfig:
 
 
 @dataclass(frozen=True)
+class ObstacleConfig:
+    center_offset_from_start: tuple[float, float, float]
+    radius: float
+    safety_margin: float
+    soft_constraint_buffer: float
+
+    @property
+    def activation_distance(self) -> float:
+        return self.safety_margin + self.soft_constraint_buffer
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     robot: RobotConfig
     trajectory: TrajectoryConfig
     costs: CostConfig
     reaching: ReachingConfig
+    obstacle: ObstacleConfig
 
 
 def _positive(data: dict[str, Any], key: str) -> float:
     value = float(data[key])
-    if value <= 0:
+    if not isfinite(value) or value <= 0:
         raise ValueError(f"{key} must be positive, got {value}")
     return value
 
@@ -75,6 +91,7 @@ def load_config(path: str | Path) -> ProjectConfig:
     trajectory = raw["trajectory"]
     costs = raw["costs"]
     reaching = raw["reaching"]
+    obstacle = raw["obstacle"]
 
     arm_joint_names = tuple(robot["arm_joint_names"])
     if len(arm_joint_names) != 7:
@@ -84,25 +101,38 @@ def load_config(path: str | Path) -> ProjectConfig:
     if len(torque_limits) != 7 or any(limit <= 0 for limit in torque_limits):
         raise ValueError("The Panda arm must have 7 positive torque limits")
 
+    locked_joint_positions = tuple(float(value) for value in robot["locked_joint_positions"])
+    if len(locked_joint_positions) != len(robot["locked_joint_names"]) or not all(
+        isfinite(value) for value in locked_joint_positions
+    ):
+        raise ValueError("Each locked joint must have one finite locked position")
+
     horizon_steps = int(trajectory["horizon_steps"])
     if horizon_steps <= 0:
         raise ValueError("horizon_steps must be positive")
 
     target_offset = tuple(float(value) for value in reaching["target_offset"])
-    if len(target_offset) != 3:
+    if len(target_offset) != 3 or not all(isfinite(value) for value in target_offset):
         raise ValueError("target_offset must contain x, y, and z")
     target_orientation_rpy = tuple(float(value) for value in reaching["target_orientation_rpy"])
-    if len(target_orientation_rpy) != 3:
+    if len(target_orientation_rpy) != 3 or not all(
+        isfinite(value) for value in target_orientation_rpy
+    ):
         raise ValueError("target_orientation_rpy must contain roll, pitch, and yaw")
     max_iterations = int(reaching["max_iterations"])
     if max_iterations <= 0:
         raise ValueError("max_iterations must be positive")
+
+    obstacle_offset = tuple(float(value) for value in obstacle["center_offset_from_start"])
+    if len(obstacle_offset) != 3 or not all(isfinite(value) for value in obstacle_offset):
+        raise ValueError("center_offset_from_start must contain x, y, and z")
 
     return ProjectConfig(
         robot=RobotConfig(
             name=str(robot["name"]),
             arm_joint_names=arm_joint_names,
             locked_joint_names=tuple(robot["locked_joint_names"]),
+            locked_joint_positions=locked_joint_positions,
             end_effector_frame=str(robot["end_effector_frame"]),
             torque_limits=torque_limits,
         ),
@@ -119,6 +149,7 @@ def load_config(path: str | Path) -> ProjectConfig:
             terminal_state_regularization=_positive(costs, "terminal_state_regularization"),
             control_regularization=_positive(costs, "control_regularization"),
             joint_limits=_positive(costs, "joint_limits"),
+            obstacle_avoidance=_positive(costs, "obstacle_avoidance"),
         ),
         reaching=ReachingConfig(
             target_offset=target_offset,
@@ -128,5 +159,11 @@ def load_config(path: str | Path) -> ProjectConfig:
             playback_settle_time=_positive(reaching, "playback_settle_time"),
             playback_position_gain=_positive(reaching, "playback_position_gain"),
             playback_velocity_gain=_positive(reaching, "playback_velocity_gain"),
+        ),
+        obstacle=ObstacleConfig(
+            center_offset_from_start=obstacle_offset,
+            radius=_positive(obstacle, "radius"),
+            safety_margin=_positive(obstacle, "safety_margin"),
+            soft_constraint_buffer=_positive(obstacle, "soft_constraint_buffer"),
         ),
     )

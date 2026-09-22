@@ -55,6 +55,26 @@ def test_grasp_center_site_is_fixed_between_fingertips() -> None:
     assert np.allclose(simulation.model.site_pos[site_id], GRASP_CENTER_FROM_HAND)
 
 
+def test_obstacle_is_visible_but_does_not_create_unmodelled_contacts() -> None:
+    import mujoco
+
+    position = np.array([0.5, 0.04, 0.56])
+    simulation = load_panda_simulation(obstacle_position=position, obstacle_radius=0.03)
+    obstacle_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_GEOM, "reaching_obstacle")
+
+    assert obstacle_id >= 0
+    assert np.allclose(simulation.model.geom_pos[obstacle_id], position)
+    assert simulation.model.geom_size[obstacle_id, 0] == pytest.approx(0.03)
+    assert simulation.model.geom_contype[obstacle_id] == 0
+    assert simulation.model.geom_conaffinity[obstacle_id] == 0
+    assert np.isfinite(simulation.minimum_robot_obstacle_distance())
+
+
+def test_obstacle_requires_both_position_and_radius() -> None:
+    with pytest.raises(ValueError, match="must be provided together"):
+        load_panda_simulation(obstacle_position=[0.5, 0.0, 0.5])
+
+
 def test_headless_simulation_remains_finite_with_gravity_compensation() -> None:
     simulation = load_panda_simulation()
 

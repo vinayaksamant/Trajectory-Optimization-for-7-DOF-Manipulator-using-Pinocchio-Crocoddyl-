@@ -18,6 +18,8 @@ def test_crocoddyl_solution_tracks_in_mujoco() -> None:
     simulation = load_panda_simulation(
         target_position=solution.target_position,
         target_rotation=solution.target_rotation,
+        obstacle_position=solution.obstacle_center,
+        obstacle_radius=config.obstacle.radius,
     )
 
     result = replay_reaching_solution(panda, config, solution, simulation)
@@ -30,3 +32,4 @@ def test_crocoddyl_solution_tracks_in_mujoco() -> None:
     assert result.maximum_torque_ratio <= 1.0
     assert result.saturated_control_steps == 0
     assert result.final_grasp_center_orientation_error < 1e-2
+    assert result.minimum_arm_obstacle_clearance >= -1e-3

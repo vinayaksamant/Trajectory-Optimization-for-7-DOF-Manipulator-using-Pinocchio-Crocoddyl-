@@ -21,6 +21,8 @@ class PlaybackResult:
     final_grasp_center_rotation: np.ndarray
     final_grasp_center_error: float
     final_grasp_center_orientation_error: float
+    minimum_arm_obstacle_distance: float
+    minimum_arm_obstacle_clearance: float
     final_speed: float
     rms_joint_position_error: float
     maximum_joint_position_error: float
@@ -42,6 +44,11 @@ class PlaybackResult:
             failures.append(
                 "final MuJoCo grasp-center orientation error is "
                 f"{self.final_grasp_center_orientation_error:.3e} rad"
+            )
+        if self.minimum_arm_obstacle_clearance < -1e-3:
+            failures.append(
+                "MuJoCo robot geometry enters the obstacle safety margin by "
+                f"{-self.minimum_arm_obstacle_clearance:.3e} m"
             )
         if self.final_speed > 5e-2:
             failures.append(f"final MuJoCo joint speed is {self.final_speed:.3e} rad/s")
@@ -84,6 +91,10 @@ def replay_reaching_solution(
 
     state = crocoddyl.StateMultibody(panda.model)
     simulation.reset_home()
+    grasp_center_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_SITE, "grasp_center")
+    if grasp_center_id < 0:
+        raise ValueError("The MuJoCo Panda model does not contain the grasp-center site")
+    minimum_arm_obstacle_distance = simulation.minimum_robot_obstacle_distance()
     actual_states = [np.concatenate((simulation.arm_configuration, simulation.arm_velocity))]
     applied_controls: list[np.ndarray] = []
     saturated_control_steps = 0
@@ -105,6 +116,10 @@ def replay_reaching_solution(
 
         for _ in range(substeps):
             simulation.step()
+            minimum_arm_obstacle_distance = min(
+                minimum_arm_obstacle_distance,
+                simulation.minimum_robot_obstacle_distance(),
+            )
             if after_step is not None:
                 after_step(simulation)
 
@@ -139,6 +154,10 @@ def replay_reaching_solution(
             float(np.max(np.abs(applied_torque) / torque_limits)),
         )
         simulation.step()
+        minimum_arm_obstacle_distance = min(
+            minimum_arm_obstacle_distance,
+            simulation.minimum_robot_obstacle_distance(),
+        )
         if after_step is not None:
             after_step(simulation)
 
@@ -149,9 +168,6 @@ def replay_reaching_solution(
     joint_position_errors = states_array[:, :7] - solution.states[:, :7]
     lower_margins = states_array[:, :7] - panda.model.lowerPositionLimit
     upper_margins = panda.model.upperPositionLimit - states_array[:, :7]
-    grasp_center_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_SITE, "grasp_center")
-    if grasp_center_id < 0:
-        raise ValueError("The MuJoCo Panda model does not contain the grasp-center site")
     final_grasp_center_position = simulation.data.site_xpos[grasp_center_id].copy()
     final_grasp_center_rotation = simulation.data.site_xmat[grasp_center_id].reshape(3, 3).copy()
     result = PlaybackResult(
@@ -164,6 +180,10 @@ def replay_reaching_solution(
         ),
         final_grasp_center_orientation_error=rotation_distance(
             final_grasp_center_rotation, solution.target_rotation
+        ),
+        minimum_arm_obstacle_distance=minimum_arm_obstacle_distance,
+        minimum_arm_obstacle_clearance=(
+            minimum_arm_obstacle_distance - solution.obstacle_safety_margin
         ),
         final_speed=float(np.linalg.norm(simulation.arm_velocity)),
         rms_joint_position_error=float(np.sqrt(np.mean(joint_position_errors**2))),

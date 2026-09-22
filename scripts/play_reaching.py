@@ -49,6 +49,8 @@ def main() -> None:
     simulation = load_panda_simulation(
         target_position=solution.target_position,
         target_rotation=solution.target_rotation,
+        obstacle_position=solution.obstacle_center,
+        obstacle_radius=config.obstacle.radius,
     )
 
     if args.headless:
@@ -87,6 +89,8 @@ def main() -> None:
     print("Crocoddyl trajectory replayed in MuJoCo")
     print(f"  final grasp-center error: {result.final_grasp_center_error:.3e} m")
     print(f"  final orientation error:  {result.final_grasp_center_orientation_error:.3e} rad")
+    print(f"  minimum arm-obstacle gap:   {result.minimum_arm_obstacle_distance:.3e} m")
+    print(f"  minimum safety clearance:  {result.minimum_arm_obstacle_clearance:.3e} m")
     print(f"  final joint speed:        {result.final_speed:.3e} rad/s")
     print(f"  RMS joint tracking error: {result.rms_joint_position_error:.3e} rad")
     print(f"  max joint tracking error: {result.maximum_joint_position_error:.3e} rad")

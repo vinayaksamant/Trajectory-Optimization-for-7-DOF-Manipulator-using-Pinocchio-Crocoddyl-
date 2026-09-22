@@ -1,4 +1,4 @@
-"""First bounded Crocoddyl problem: move the Panda hand to a nearby target."""
+"""Bounded Crocoddyl pose reaching with gripper-center obstacle avoidance."""
 
 from __future__ import annotations
 
@@ -6,6 +6,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from panda_trajopt.collision import (
+    make_full_arm_obstacle_residual,
+    minimum_arm_obstacle_distance,
+)
 from panda_trajopt.config import ProjectConfig
 from panda_trajopt.model import PandaModel
 from panda_trajopt.mujoco_sim import PANDA_HOME
@@ -20,6 +24,9 @@ class ReachingSolution:
     initial_rotation: np.ndarray
     target_position: np.ndarray
     target_rotation: np.ndarray
+    obstacle_center: np.ndarray
+    obstacle_radius: float
+    obstacle_safety_margin: float
     final_position: np.ndarray
     final_rotation: np.ndarray
     converged: bool
@@ -28,6 +35,9 @@ class ReachingSolution:
     stopping_value: float
     final_position_error: float
     final_orientation_error: float
+    minimum_arm_obstacle_distance: float
+    minimum_arm_obstacle_clearance: float
+    closest_collision_geometry: str
     final_speed: float
     minimum_joint_margin: float
     maximum_torque_ratio: float
@@ -35,7 +45,10 @@ class ReachingSolution:
     def validate(self) -> None:
         failures: list[str] = []
         if not self.converged:
-            failures.append("BoxFDDP did not report convergence")
+            failures.append(
+                "BoxFDDP did not report convergence "
+                f"after {self.iterations} iterations (stop={self.stopping_value:.3e})"
+            )
         if not np.all(np.isfinite(self.states)) or not np.all(np.isfinite(self.controls)):
             failures.append("trajectory contains a non-finite value")
         if self.final_position_error > 1e-3:
@@ -43,6 +56,11 @@ class ReachingSolution:
         if self.final_orientation_error > 1e-3:
             failures.append(
                 f"final grasp-center orientation error is {self.final_orientation_error:.3e} rad"
+            )
+        if self.minimum_arm_obstacle_clearance < -1e-3:
+            failures.append(
+                "Panda collision geometry enters the obstacle safety margin by "
+                f"{-self.minimum_arm_obstacle_clearance:.3e} m"
             )
         if self.final_speed > 1e-2:
             failures.append(f"final joint speed norm is {self.final_speed:.3e} rad/s")
@@ -93,7 +111,7 @@ def solve_reaching_problem(
     panda: PandaModel,
     config: ProjectConfig,
 ) -> ReachingSolution:
-    """Solve a two-second, torque-limited hand-translation problem."""
+    """Solve a torque-limited gripper pose task around a spherical obstacle."""
     import crocoddyl
     import pinocchio as pin
 
@@ -113,6 +131,16 @@ def solve_reaching_problem(
     target_rotation = initial_rotation @ pin.rpy.rpyToMatrix(
         np.asarray(config.reaching.target_orientation_rpy)
     )
+    obstacle_center = initial_position + np.asarray(config.obstacle.center_offset_from_start)
+    initial_obstacle_distance = minimum_arm_obstacle_distance(
+        panda, PANDA_HOME, obstacle_center, config.obstacle.radius
+    )
+    if initial_obstacle_distance.distance <= config.obstacle.safety_margin:
+        raise ValueError(
+            "The initial full-arm pose is inside the obstacle safety margin: "
+            f"{initial_obstacle_distance.geometry_name} has "
+            f"{initial_obstacle_distance.distance:.3e} m clearance"
+        )
 
     def make_costs(terminal: bool) -> object:
         costs = crocoddyl.CostModelSum(state, actuation.nu)
@@ -146,6 +174,28 @@ def solve_reaching_problem(
             crocoddyl.CostModelResidual(state, rotation_residual),
             rotation_weight,
         )
+
+        if not terminal:
+            obstacle_residual = make_full_arm_obstacle_residual(
+                crocoddyl,
+                state,
+                panda,
+                obstacle_center,
+                config.obstacle.radius,
+                config.obstacle.activation_distance,
+                actuation.nu,
+            )
+            obstacle_activation = crocoddyl.ActivationModelQuadraticBarrier(
+                crocoddyl.ActivationBounds(
+                    np.array([config.obstacle.activation_distance]),
+                    np.array([np.inf]),
+                )
+            )
+            costs.addCost(
+                "full_arm_obstacle",
+                crocoddyl.CostModelResidual(state, obstacle_activation, obstacle_residual),
+                config.costs.obstacle_avoidance,
+            )
 
         state_weight = (
             config.costs.terminal_state_regularization
@@ -194,12 +244,12 @@ def solve_reaching_problem(
     initial_states = [initial_state.copy() for _ in range(problem.T + 1)]
     initial_controls = problem.quasiStatic(initial_states[:-1])
     solver = crocoddyl.SolverBoxFDDP(problem)
+    solver.th_stop = config.reaching.stopping_threshold
     converged = solver.solve(
         initial_states,
         initial_controls,
         config.reaching.max_iterations,
         False,
-        config.reaching.stopping_threshold,
     )
 
     states = np.asarray(solver.xs).copy()
@@ -209,6 +259,19 @@ def solve_reaching_problem(
     pin.framesForwardKinematics(model, pin_data, final_configuration)
     final_position = pin_data.oMf[panda.end_effector_frame_id].translation.copy()
     final_rotation = pin_data.oMf[panda.end_effector_frame_id].rotation.copy()
+
+    minimum_distance = np.inf
+    closest_geometry = ""
+    for configuration in states[:, :7]:
+        report = minimum_arm_obstacle_distance(
+            panda,
+            configuration,
+            obstacle_center,
+            config.obstacle.radius,
+        )
+        if report.distance < minimum_distance:
+            minimum_distance = report.distance
+            closest_geometry = report.geometry_name
 
     lower_margins = states[:, :7] - model.lowerPositionLimit
     upper_margins = model.upperPositionLimit - states[:, :7]
@@ -221,6 +284,9 @@ def solve_reaching_problem(
         initial_rotation=initial_rotation,
         target_position=target_position,
         target_rotation=target_rotation,
+        obstacle_center=obstacle_center,
+        obstacle_radius=config.obstacle.radius,
+        obstacle_safety_margin=config.obstacle.safety_margin,
         final_position=final_position,
         final_rotation=final_rotation,
         converged=bool(converged),
@@ -229,6 +295,9 @@ def solve_reaching_problem(
         stopping_value=float(solver.stop),
         final_position_error=float(np.linalg.norm(final_position - target_position)),
         final_orientation_error=rotation_distance(final_rotation, target_rotation),
+        minimum_arm_obstacle_distance=minimum_distance,
+        minimum_arm_obstacle_clearance=(minimum_distance - config.obstacle.safety_margin),
+        closest_collision_geometry=closest_geometry,
         final_speed=float(np.linalg.norm(states[-1, 7:])),
         minimum_joint_margin=float(min(np.min(lower_margins), np.min(upper_margins))),
         maximum_torque_ratio=maximum_torque_ratio,
