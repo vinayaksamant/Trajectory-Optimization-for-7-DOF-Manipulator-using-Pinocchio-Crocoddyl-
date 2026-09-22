@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -8,6 +10,7 @@ from panda_trajopt.mujoco_sim import (
     TABLE_HEIGHT,
     load_panda_simulation,
 )
+from panda_trajopt.visualization import MuJoCoPathOverlay
 
 
 def test_panda_arm_uses_seven_direct_torque_actuators() -> None:
@@ -59,20 +62,52 @@ def test_obstacle_is_visible_but_does_not_create_unmodelled_contacts() -> None:
     import mujoco
 
     position = np.array([0.5, 0.04, 0.56])
-    simulation = load_panda_simulation(obstacle_position=position, obstacle_radius=0.03)
+    simulation = load_panda_simulation(
+        obstacle_position=position,
+        obstacle_radius=0.03,
+        obstacle_safety_margin=0.005,
+        obstacle_soft_constraint_buffer=0.006,
+    )
     obstacle_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_GEOM, "reaching_obstacle")
+    safety_id = mujoco.mj_name2id(
+        simulation.model,
+        mujoco.mjtObj.mjOBJ_GEOM,
+        "reaching_obstacle_safety_region",
+    )
+    activation_id = mujoco.mj_name2id(
+        simulation.model,
+        mujoco.mjtObj.mjOBJ_GEOM,
+        "reaching_obstacle_activation_region",
+    )
 
     assert obstacle_id >= 0
     assert np.allclose(simulation.model.geom_pos[obstacle_id], position)
     assert simulation.model.geom_size[obstacle_id, 0] == pytest.approx(0.03)
     assert simulation.model.geom_contype[obstacle_id] == 0
     assert simulation.model.geom_conaffinity[obstacle_id] == 0
+    assert simulation.model.geom_size[safety_id, 0] == pytest.approx(0.035)
+    assert simulation.model.geom_size[activation_id, 0] == pytest.approx(0.041)
     assert np.isfinite(simulation.minimum_robot_obstacle_distance())
 
 
 def test_obstacle_requires_both_position_and_radius() -> None:
     with pytest.raises(ValueError, match="must be provided together"):
         load_panda_simulation(obstacle_position=[0.5, 0.0, 0.5])
+
+
+def test_path_overlay_draws_planned_and_executed_segments() -> None:
+    import mujoco
+
+    simulation = load_panda_simulation()
+    viewer = SimpleNamespace(user_scn=mujoco.MjvScene(simulation.model, maxgeom=10))
+    planned = np.array([[0.5, 0.0, 0.5], [0.5, 0.1, 0.55], [0.45, 0.1, 0.6]])
+    overlay = MuJoCoPathOverlay(viewer, planned)
+    overlay.add_executed_point(planned[0])
+    overlay.add_executed_point(planned[1])
+
+    overlay.draw()
+
+    assert viewer.user_scn.ngeom == 3
 
 
 def test_headless_simulation_remains_finite_with_gravity_compensation() -> None:

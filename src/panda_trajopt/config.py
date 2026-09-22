@@ -45,7 +45,7 @@ class CostConfig:
 
 @dataclass(frozen=True)
 class ReachingConfig:
-    target_offset: tuple[float, float, float]
+    target_position: tuple[float, float, float]
     target_orientation_rpy: tuple[float, float, float]
     max_iterations: int
     stopping_threshold: float
@@ -56,7 +56,7 @@ class ReachingConfig:
 
 @dataclass(frozen=True)
 class ObstacleConfig:
-    center_offset_from_start: tuple[float, float, float]
+    center_position: tuple[float, float, float]
     radius: float
     safety_margin: float
     soft_constraint_buffer: float
@@ -111,9 +111,9 @@ def load_config(path: str | Path) -> ProjectConfig:
     if horizon_steps <= 0:
         raise ValueError("horizon_steps must be positive")
 
-    target_offset = tuple(float(value) for value in reaching["target_offset"])
-    if len(target_offset) != 3 or not all(isfinite(value) for value in target_offset):
-        raise ValueError("target_offset must contain x, y, and z")
+    target_position = tuple(float(value) for value in reaching["target_position"])
+    if len(target_position) != 3 or not all(isfinite(value) for value in target_position):
+        raise ValueError("target_position must contain finite x, y, and z coordinates")
     target_orientation_rpy = tuple(float(value) for value in reaching["target_orientation_rpy"])
     if len(target_orientation_rpy) != 3 or not all(
         isfinite(value) for value in target_orientation_rpy
@@ -123,9 +123,9 @@ def load_config(path: str | Path) -> ProjectConfig:
     if max_iterations <= 0:
         raise ValueError("max_iterations must be positive")
 
-    obstacle_offset = tuple(float(value) for value in obstacle["center_offset_from_start"])
-    if len(obstacle_offset) != 3 or not all(isfinite(value) for value in obstacle_offset):
-        raise ValueError("center_offset_from_start must contain x, y, and z")
+    obstacle_position = tuple(float(value) for value in obstacle["center_position"])
+    if len(obstacle_position) != 3 or not all(isfinite(value) for value in obstacle_position):
+        raise ValueError("center_position must contain finite x, y, and z coordinates")
 
     return ProjectConfig(
         robot=RobotConfig(
@@ -152,7 +152,7 @@ def load_config(path: str | Path) -> ProjectConfig:
             obstacle_avoidance=_positive(costs, "obstacle_avoidance"),
         ),
         reaching=ReachingConfig(
-            target_offset=target_offset,
+            target_position=target_position,
             target_orientation_rpy=target_orientation_rpy,
             max_iterations=max_iterations,
             stopping_threshold=_positive(reaching, "stopping_threshold"),
@@ -161,7 +161,7 @@ def load_config(path: str | Path) -> ProjectConfig:
             playback_velocity_gain=_positive(reaching, "playback_velocity_gain"),
         ),
         obstacle=ObstacleConfig(
-            center_offset_from_start=obstacle_offset,
+            center_position=obstacle_position,
             radius=_positive(obstacle, "radius"),
             safety_margin=_positive(obstacle, "safety_margin"),
             soft_constraint_buffer=_positive(obstacle, "soft_constraint_buffer"),

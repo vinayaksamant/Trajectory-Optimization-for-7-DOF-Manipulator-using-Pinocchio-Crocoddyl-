@@ -20,6 +20,7 @@ robotics = [
   "example-robot-data>=4.0",
 ]
 simulation = [
+  "matplotlib>=3.8",
   "mujoco>=3.3",
   "mujoco-menagerie>=2026.9.0",
 ]

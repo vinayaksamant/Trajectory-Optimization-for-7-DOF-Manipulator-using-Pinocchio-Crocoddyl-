@@ -100,8 +100,14 @@ def _add_grasp_center_site(spec: object) -> None:
     )
 
 
-def _add_obstacle(spec: object, obstacle_position: Sequence[float], obstacle_radius: float) -> None:
-    """Add the spherical obstacle used by the Crocoddyl reaching cost."""
+def _add_obstacle(
+    spec: object,
+    obstacle_position: Sequence[float],
+    obstacle_radius: float,
+    safety_margin: float,
+    soft_constraint_buffer: float,
+) -> None:
+    """Add the obstacle together with safety and soft-cost boundaries."""
     import mujoco
 
     position = np.asarray(obstacle_position, dtype=float)
@@ -109,6 +115,32 @@ def _add_obstacle(spec: object, obstacle_position: Sequence[float], obstacle_rad
         raise ValueError("obstacle_position must contain three finite values")
     if not np.isfinite(obstacle_radius) or obstacle_radius <= 0:
         raise ValueError("obstacle_radius must be positive")
+    if not np.isfinite(safety_margin) or safety_margin < 0:
+        raise ValueError("safety_margin cannot be negative")
+    if not np.isfinite(soft_constraint_buffer) or soft_constraint_buffer < 0:
+        raise ValueError("soft_constraint_buffer cannot be negative")
+
+    for name, radius, color in (
+        (
+            "reaching_obstacle_activation_region",
+            obstacle_radius + safety_margin + soft_constraint_buffer,
+            [1.0, 0.85, 0.1, 0.10],
+        ),
+        (
+            "reaching_obstacle_safety_region",
+            obstacle_radius + safety_margin,
+            [1.0, 0.45, 0.05, 0.18],
+        ),
+    ):
+        spec.worldbody.add_geom(
+            name=name,
+            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+            pos=position,
+            size=[radius],
+            rgba=color,
+            contype=0,
+            conaffinity=0,
+        )
     spec.worldbody.add_geom(
         name="reaching_obstacle",
         type=mujoco.mjtGeom.mjGEOM_SPHERE,
@@ -228,6 +260,8 @@ def load_panda_simulation(
     target_rotation: np.ndarray | None = None,
     obstacle_position: Sequence[float] | None = None,
     obstacle_radius: float | None = None,
+    obstacle_safety_margin: float = 0.0,
+    obstacle_soft_constraint_buffer: float = 0.0,
 ) -> PandaSimulation:
     """Load the official Menagerie scene and convert its arm to torque control."""
     try:
@@ -247,7 +281,13 @@ def load_panda_simulation(
     elif target_rotation is not None:
         raise ValueError("target_rotation requires target_position")
     if obstacle_position is not None and obstacle_radius is not None:
-        _add_obstacle(spec, obstacle_position, obstacle_radius)
+        _add_obstacle(
+            spec,
+            obstacle_position,
+            obstacle_radius,
+            obstacle_safety_margin,
+            obstacle_soft_constraint_buffer,
+        )
     elif obstacle_position is not None or obstacle_radius is not None:
         raise ValueError("obstacle_position and obstacle_radius must be provided together")
 

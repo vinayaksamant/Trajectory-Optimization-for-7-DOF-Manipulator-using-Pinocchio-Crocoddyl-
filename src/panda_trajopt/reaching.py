@@ -20,6 +20,10 @@ class ReachingSolution:
     states: np.ndarray
     controls: np.ndarray
     feedback_gains: np.ndarray
+    planned_grasp_center_positions: np.ndarray
+    planned_arm_obstacle_distances: np.ndarray
+    solver_cost_trace: np.ndarray
+    solver_stopping_trace: np.ndarray
     initial_position: np.ndarray
     initial_rotation: np.ndarray
     target_position: np.ndarray
@@ -51,6 +55,12 @@ class ReachingSolution:
             )
         if not np.all(np.isfinite(self.states)) or not np.all(np.isfinite(self.controls)):
             failures.append("trajectory contains a non-finite value")
+        if self.planned_grasp_center_positions.shape != (self.states.shape[0], 3):
+            failures.append("planned grasp-center path has unexpected dimensions")
+        if self.planned_arm_obstacle_distances.shape != (self.states.shape[0],):
+            failures.append("planned obstacle-distance trace has unexpected dimensions")
+        if self.solver_cost_trace.size == 0 or self.solver_stopping_trace.size == 0:
+            failures.append("solver convergence history is empty")
         if self.final_position_error > 1e-3:
             failures.append(f"final grasp-center error is {self.final_position_error:.3e} m")
         if self.final_orientation_error > 1e-3:
@@ -107,9 +117,36 @@ def _joint_limit_cost(
     return crocoddyl.CostModelResidual(state, activation, residual)
 
 
+def reaching_scene_geometry(
+    panda: PandaModel, config: ProjectConfig
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return initial pose, target pose, and obstacle center in the world frame."""
+    import pinocchio as pin
+
+    data = panda.model.createData()
+    pin.framesForwardKinematics(panda.model, data, PANDA_HOME)
+    initial_placement = data.oMf[panda.end_effector_frame_id]
+    initial_position = initial_placement.translation.copy()
+    initial_rotation = initial_placement.rotation.copy()
+    target_position = np.asarray(config.reaching.target_position)
+    target_rotation = initial_rotation @ pin.rpy.rpyToMatrix(
+        np.asarray(config.reaching.target_orientation_rpy)
+    )
+    obstacle_center = np.asarray(config.obstacle.center_position)
+    return (
+        initial_position,
+        initial_rotation,
+        target_position,
+        target_rotation,
+        obstacle_center,
+    )
+
+
 def solve_reaching_problem(
     panda: PandaModel,
     config: ProjectConfig,
+    *,
+    validate_solution: bool = True,
 ) -> ReachingSolution:
     """Solve a torque-limited gripper pose task around a spherical obstacle."""
     import crocoddyl
@@ -123,15 +160,13 @@ def solve_reaching_problem(
 
     initial_state = np.concatenate((PANDA_HOME, np.zeros(7)))
     pin_data = model.createData()
-    pin.framesForwardKinematics(model, pin_data, PANDA_HOME)
-    initial_placement = pin_data.oMf[panda.end_effector_frame_id]
-    initial_position = initial_placement.translation.copy()
-    initial_rotation = initial_placement.rotation.copy()
-    target_position = initial_position + np.asarray(config.reaching.target_offset)
-    target_rotation = initial_rotation @ pin.rpy.rpyToMatrix(
-        np.asarray(config.reaching.target_orientation_rpy)
-    )
-    obstacle_center = initial_position + np.asarray(config.obstacle.center_offset_from_start)
+    (
+        initial_position,
+        initial_rotation,
+        target_position,
+        target_rotation,
+        obstacle_center,
+    ) = reaching_scene_geometry(panda, config)
     initial_obstacle_distance = minimum_arm_obstacle_distance(
         panda, PANDA_HOME, obstacle_center, config.obstacle.radius
     )
@@ -245,6 +280,8 @@ def solve_reaching_problem(
     initial_controls = problem.quasiStatic(initial_states[:-1])
     solver = crocoddyl.SolverBoxFDDP(problem)
     solver.th_stop = config.reaching.stopping_threshold
+    solver_logger = crocoddyl.CallbackLogger()
+    solver.setCallbacks([solver_logger])
     converged = solver.solve(
         initial_states,
         initial_controls,
@@ -260,15 +297,20 @@ def solve_reaching_problem(
     final_position = pin_data.oMf[panda.end_effector_frame_id].translation.copy()
     final_rotation = pin_data.oMf[panda.end_effector_frame_id].rotation.copy()
 
+    planned_positions: list[np.ndarray] = []
+    planned_distances: list[float] = []
     minimum_distance = np.inf
     closest_geometry = ""
     for configuration in states[:, :7]:
+        pin.framesForwardKinematics(model, pin_data, configuration)
+        planned_positions.append(pin_data.oMf[panda.end_effector_frame_id].translation.copy())
         report = minimum_arm_obstacle_distance(
             panda,
             configuration,
             obstacle_center,
             config.obstacle.radius,
         )
+        planned_distances.append(report.distance)
         if report.distance < minimum_distance:
             minimum_distance = report.distance
             closest_geometry = report.geometry_name
@@ -280,6 +322,10 @@ def solve_reaching_problem(
         states=states,
         controls=controls,
         feedback_gains=feedback_gains,
+        planned_grasp_center_positions=np.asarray(planned_positions),
+        planned_arm_obstacle_distances=np.asarray(planned_distances),
+        solver_cost_trace=np.asarray(solver_logger.costs, dtype=float),
+        solver_stopping_trace=np.asarray(solver_logger.stops, dtype=float),
         initial_position=initial_position,
         initial_rotation=initial_rotation,
         target_position=target_position,
@@ -302,5 +348,6 @@ def solve_reaching_problem(
         minimum_joint_margin=float(min(np.min(lower_margins), np.min(upper_margins))),
         maximum_torque_ratio=maximum_torque_ratio,
     )
-    solution.validate()
+    if validate_solution:
+        solution.validate()
     return solution

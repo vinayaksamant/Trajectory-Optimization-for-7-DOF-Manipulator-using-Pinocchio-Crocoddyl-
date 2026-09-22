@@ -17,6 +17,8 @@ from panda_trajopt.reaching import ReachingSolution, rotation_distance
 class PlaybackResult:
     actual_states: np.ndarray
     applied_controls: np.ndarray
+    actual_grasp_center_positions: np.ndarray
+    actual_arm_obstacle_distances: np.ndarray
     final_grasp_center_position: np.ndarray
     final_grasp_center_rotation: np.ndarray
     final_grasp_center_error: float
@@ -36,6 +38,10 @@ class PlaybackResult:
             failures.append("replayed state contains a non-finite value")
         if not np.all(np.isfinite(self.applied_controls)):
             failures.append("replayed control contains a non-finite value")
+        if self.actual_grasp_center_positions.shape != (self.actual_states.shape[0], 3):
+            failures.append("executed grasp-center path has unexpected dimensions")
+        if self.actual_arm_obstacle_distances.shape != (self.actual_states.shape[0],):
+            failures.append("executed obstacle-distance trace has unexpected dimensions")
         if self.final_grasp_center_error > 1e-2:
             failures.append(
                 f"final MuJoCo grasp-center error is {self.final_grasp_center_error:.3e} m"
@@ -96,6 +102,8 @@ def replay_reaching_solution(
         raise ValueError("The MuJoCo Panda model does not contain the grasp-center site")
     minimum_arm_obstacle_distance = simulation.minimum_robot_obstacle_distance()
     actual_states = [np.concatenate((simulation.arm_configuration, simulation.arm_velocity))]
+    actual_positions = [simulation.data.site_xpos[grasp_center_id].copy()]
+    actual_distances = [minimum_arm_obstacle_distance]
     applied_controls: list[np.ndarray] = []
     saturated_control_steps = 0
     maximum_torque_ratio = 0.0
@@ -126,6 +134,8 @@ def replay_reaching_solution(
         actual_states.append(
             np.concatenate((simulation.arm_configuration, simulation.arm_velocity))
         )
+        actual_positions.append(simulation.data.site_xpos[grasp_center_id].copy())
+        actual_distances.append(simulation.minimum_robot_obstacle_distance())
 
     # The terminal Crocoddyl state has no control associated with it. Use a
     # brief gravity-compensated joint hold to let the independent simulator stop.
@@ -162,9 +172,13 @@ def replay_reaching_solution(
             after_step(simulation)
 
     actual_states[-1] = np.concatenate((simulation.arm_configuration, simulation.arm_velocity))
+    actual_positions[-1] = simulation.data.site_xpos[grasp_center_id].copy()
+    actual_distances[-1] = simulation.minimum_robot_obstacle_distance()
 
     states_array = np.asarray(actual_states)
     controls_array = np.asarray(applied_controls)
+    positions_array = np.asarray(actual_positions)
+    distances_array = np.asarray(actual_distances)
     joint_position_errors = states_array[:, :7] - solution.states[:, :7]
     lower_margins = states_array[:, :7] - panda.model.lowerPositionLimit
     upper_margins = panda.model.upperPositionLimit - states_array[:, :7]
@@ -173,6 +187,8 @@ def replay_reaching_solution(
     result = PlaybackResult(
         actual_states=states_array,
         applied_controls=controls_array,
+        actual_grasp_center_positions=positions_array,
+        actual_arm_obstacle_distances=distances_array,
         final_grasp_center_position=final_grasp_center_position,
         final_grasp_center_rotation=final_grasp_center_rotation,
         final_grasp_center_error=float(

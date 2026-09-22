@@ -20,6 +20,8 @@ def test_default_config_describes_seven_dof_arm() -> None:
     assert config.robot.end_effector_frame == "panda_hand_tcp"
     assert config.robot.torque_limits == (87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0)
     assert config.trajectory.duration == pytest.approx(2.0)
+    assert len(config.reaching.target_position) == 3
+    assert len(config.obstacle.center_position) == 3
     assert config.obstacle.activation_distance == pytest.approx(0.011)
 
 
