@@ -50,6 +50,7 @@ def test_box_fddp_mpc_replans_from_mujoco_state() -> None:
     )
 
     result.validate()
+    assert result.solver_name == "box_fddp"
     assert result.states.shape == (config.mpc.simulation_steps + 1, 14)
     assert result.controls.shape == (config.mpc.simulation_steps, 7)
     assert result.replan_times.shape == (config.mpc.simulation_steps,)
@@ -63,3 +64,29 @@ def test_box_fddp_mpc_replans_from_mujoco_state() -> None:
     assert replanned_steps == list(range(config.mpc.simulation_steps))
     expected_substeps = round(config.trajectory.time_step / simulation.model.opt.timestep)
     assert simulation_callback_count == config.mpc.simulation_steps * expected_substeps
+
+
+def test_ilqr_style_solver_can_drive_mpc() -> None:
+    config = load_config(ROOT / "configs" / "panda.yaml")
+    config = replace(
+        config,
+        reaching=replace(config.reaching, target_position=(0.53, 0.02, 0.55)),
+        obstacle=replace(config.obstacle, center_position=(-0.4, 0.0, 0.5)),
+        mpc=replace(config.mpc, horizon_steps=6, simulation_steps=2, max_iterations=2),
+    )
+    panda = load_panda_arm(config.robot)
+    _, _, target_position, target_rotation, obstacle_center = reaching_scene_geometry(panda, config)
+    simulation = load_panda_simulation(
+        target_position=target_position,
+        target_rotation=target_rotation,
+        obstacle_position=obstacle_center,
+        obstacle_radius=config.obstacle.radius,
+        obstacle_safety_margin=config.obstacle.safety_margin,
+        obstacle_soft_constraint_buffer=config.obstacle.soft_constraint_buffer,
+    )
+
+    result = run_mpc(panda, config, simulation, solver_kind="ilqr")
+
+    result.validate()
+    assert result.solver_name == "ilqr"
+    assert result.final_goal_error < result.initial_goal_error

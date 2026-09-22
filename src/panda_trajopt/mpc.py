@@ -16,6 +16,7 @@ from panda_trajopt.reaching import ReachingSolution, rotation_distance, solve_re
 
 @dataclass(frozen=True)
 class MpcResult:
+    solver_name: str
     states: np.ndarray
     controls: np.ndarray
     replan_times: np.ndarray
@@ -54,6 +55,7 @@ def run_mpc(
     panda: PandaModel,
     config: ProjectConfig,
     simulation: PandaSimulation,
+    solver_kind: str = "box_fddp",
     on_replan: Callable[[int, ReachingSolution], None] | None = None,
     after_simulation_step: Callable[[PandaSimulation], None] | None = None,
 ) -> MpcResult:
@@ -98,7 +100,7 @@ def run_mpc(
         solution = solve_reaching_problem(
             panda,
             mpc_config,
-            solver_kind="box_fddp",
+            solver_kind=solver_kind,
             validate_solution=False,
             initial_state_override=measured_state,
             warm_start_states=warm_states,
@@ -143,6 +145,7 @@ def run_mpc(
         raise RuntimeError("MPC did not execute any replanning step")
     replan_array = np.asarray(replan_times)
     result = MpcResult(
+        solver_name=solver_kind,
         states=state_array,
         controls=np.asarray(controls),
         replan_times=replan_array,

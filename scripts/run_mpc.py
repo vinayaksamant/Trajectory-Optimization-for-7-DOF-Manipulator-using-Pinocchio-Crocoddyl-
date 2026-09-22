@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the first fixed-goal receding-horizon Panda controller headlessly."""
+"""Run fixed-goal receding-horizon Panda control in MuJoCo."""
 
 from __future__ import annotations
 
@@ -15,14 +15,20 @@ from panda_trajopt.config import load_config
 from panda_trajopt.model import load_panda_arm
 from panda_trajopt.mpc import run_mpc
 from panda_trajopt.mujoco_sim import PandaSimulation, load_panda_simulation
-from panda_trajopt.reaching import ReachingSolution, reaching_scene_geometry
+from panda_trajopt.reaching import SOLVER_KINDS, ReachingSolution, reaching_scene_geometry
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--steps", type=int, help="Override the number of MPC replans")
     parser.add_argument("--horizon", type=int, help="Override prediction-horizon nodes")
-    parser.add_argument("--iterations", type=int, help="Override BoxFDDP iterations per replan")
+    parser.add_argument("--iterations", type=int, help="Override solver iterations per replan")
+    parser.add_argument(
+        "--solver",
+        choices=SOLVER_KINDS,
+        default="box_fddp",
+        help="Crocoddyl solver used for every MPC replan (default: box_fddp)",
+    )
     parser.add_argument(
         "--headless",
         action="store_true",
@@ -128,6 +134,7 @@ def main() -> None:
                 panda,
                 config,
                 simulation,
+                solver_kind=args.solver,
                 on_replan=show_replan,
                 after_simulation_step=synchronize,
             )
@@ -139,7 +146,7 @@ def main() -> None:
             viewer.sync()
             time.sleep(args.end_pause)
 
-    print("Fixed-goal BoxFDDP MPC completed")
+    print(f"Fixed-goal {result.solver_name} MPC completed")
     print(f"  replans:                    {len(result.replan_times)}")
     print(f"  prediction horizon:         {config.mpc.horizon_steps} nodes")
     print(f"  initial goal error:         {1e3 * result.initial_goal_error:.2f} mm")

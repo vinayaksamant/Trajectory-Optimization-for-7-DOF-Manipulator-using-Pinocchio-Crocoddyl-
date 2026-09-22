@@ -15,6 +15,8 @@ from panda_trajopt.config import ProjectConfig
 from panda_trajopt.model import PandaModel
 from panda_trajopt.mujoco_sim import PANDA_HOME
 
+SOLVER_KINDS = ("box_fddp", "fddp", "ilqr")
+
 
 @dataclass(frozen=True)
 class ReachingSolution:
