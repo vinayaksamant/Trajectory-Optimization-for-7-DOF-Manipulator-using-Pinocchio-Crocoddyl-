@@ -67,12 +67,20 @@ class ObstacleConfig:
 
 
 @dataclass(frozen=True)
+class MpcConfig:
+    horizon_steps: int
+    simulation_steps: int
+    max_iterations: int
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     robot: RobotConfig
     trajectory: TrajectoryConfig
     costs: CostConfig
     reaching: ReachingConfig
     obstacle: ObstacleConfig
+    mpc: MpcConfig
 
 
 def _positive(data: dict[str, Any], key: str) -> float:
@@ -92,6 +100,7 @@ def load_config(path: str | Path) -> ProjectConfig:
     costs = raw["costs"]
     reaching = raw["reaching"]
     obstacle = raw["obstacle"]
+    mpc = raw["mpc"]
 
     arm_joint_names = tuple(robot["arm_joint_names"])
     if len(arm_joint_names) != 7:
@@ -126,6 +135,12 @@ def load_config(path: str | Path) -> ProjectConfig:
     obstacle_position = tuple(float(value) for value in obstacle["center_position"])
     if len(obstacle_position) != 3 or not all(isfinite(value) for value in obstacle_position):
         raise ValueError("center_position must contain finite x, y, and z coordinates")
+
+    mpc_integer_values = {
+        key: int(mpc[key]) for key in ("horizon_steps", "simulation_steps", "max_iterations")
+    }
+    if any(value <= 0 for value in mpc_integer_values.values()):
+        raise ValueError("All MPC step and iteration counts must be positive")
 
     return ProjectConfig(
         robot=RobotConfig(
@@ -166,4 +181,5 @@ def load_config(path: str | Path) -> ProjectConfig:
             safety_margin=_positive(obstacle, "safety_margin"),
             soft_constraint_buffer=_positive(obstacle, "soft_constraint_buffer"),
         ),
+        mpc=MpcConfig(**mpc_integer_values),
     )

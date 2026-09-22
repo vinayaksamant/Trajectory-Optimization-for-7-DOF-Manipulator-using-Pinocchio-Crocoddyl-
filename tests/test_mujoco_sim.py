@@ -104,10 +104,12 @@ def test_path_overlay_draws_planned_and_executed_segments() -> None:
     overlay = MuJoCoPathOverlay(viewer, planned)
     overlay.add_executed_point(planned[0])
     overlay.add_executed_point(planned[1])
+    overlay.set_planned_path(planned[::-1])
 
     overlay.draw()
 
     assert viewer.user_scn.ngeom == 3
+    assert np.array_equal(overlay.planned_path, planned[::-1])
 
 
 def test_headless_simulation_remains_finite_with_gravity_compensation() -> None:

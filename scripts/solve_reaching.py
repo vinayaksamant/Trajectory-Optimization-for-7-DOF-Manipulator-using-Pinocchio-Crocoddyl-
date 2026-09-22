@@ -20,10 +20,11 @@ def main() -> None:
     panda = load_panda_arm(config.robot)
     solution = solve_reaching_problem(panda, config)
 
-    print("Crocoddyl BoxFDDP reaching solution")
+    print(f"Crocoddyl {solution.solver_name} reaching solution")
     print(f"  converged:             {solution.converged}")
     print(f"  iterations:            {solution.iterations}")
     print(f"  duration:              {config.trajectory.duration:.2f} s")
+    print(f"  solve time:            {1e3 * solution.solve_time_seconds:.1f} ms")
     print(f"  initial grasp center:  {vector(solution.initial_position)} m")
     print(f"  target grasp center:   {vector(solution.target_position)} m")
     print(f"  final grasp center:    {vector(solution.final_position)} m")

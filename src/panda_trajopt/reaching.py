@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
 import numpy as np
 
@@ -17,6 +18,8 @@ from panda_trajopt.mujoco_sim import PANDA_HOME
 
 @dataclass(frozen=True)
 class ReachingSolution:
+    solver_name: str
+    solve_time_seconds: float
     states: np.ndarray
     controls: np.ndarray
     feedback_gains: np.ndarray
@@ -50,7 +53,7 @@ class ReachingSolution:
         failures: list[str] = []
         if not self.converged:
             failures.append(
-                "BoxFDDP did not report convergence "
+                f"{self.solver_name} did not report convergence "
                 f"after {self.iterations} iterations (stop={self.stopping_value:.3e})"
             )
         if not np.all(np.isfinite(self.states)) or not np.all(np.isfinite(self.controls)):
@@ -146,29 +149,51 @@ def solve_reaching_problem(
     panda: PandaModel,
     config: ProjectConfig,
     *,
+    solver_kind: str = "box_fddp",
     validate_solution: bool = True,
+    initial_state_override: np.ndarray | None = None,
+    warm_start_states: np.ndarray | None = None,
+    warm_start_controls: np.ndarray | None = None,
 ) -> ReachingSolution:
     """Solve a torque-limited gripper pose task around a spherical obstacle."""
     import crocoddyl
     import pinocchio as pin
 
     model = panda.model
+    solver_types = {
+        "box_fddp": crocoddyl.SolverBoxFDDP,
+        "fddp": crocoddyl.SolverFDDP,
+        "ilqr": crocoddyl.SolverDDP,
+    }
+    if solver_kind not in solver_types:
+        choices = ", ".join(solver_types)
+        raise ValueError(f"Unknown solver '{solver_kind}'; choose one of: {choices}")
     state = crocoddyl.StateMultibody(model)
     actuation = crocoddyl.ActuationModelFull(state)
     if state.nx != 14 or actuation.nu != 7:
         raise ValueError("Expected state dimension 14 and control dimension 7")
 
-    initial_state = np.concatenate((PANDA_HOME, np.zeros(7)))
+    initial_state = (
+        np.concatenate((PANDA_HOME, np.zeros(7)))
+        if initial_state_override is None
+        else np.asarray(initial_state_override, dtype=float).copy()
+    )
+    if initial_state.shape != (14,) or not np.all(np.isfinite(initial_state)):
+        raise ValueError("initial_state_override must contain 14 finite values")
     pin_data = model.createData()
     (
-        initial_position,
-        initial_rotation,
+        _,
+        _,
         target_position,
         target_rotation,
         obstacle_center,
     ) = reaching_scene_geometry(panda, config)
+    pin.framesForwardKinematics(model, pin_data, initial_state[:7])
+    initial_placement = pin_data.oMf[panda.end_effector_frame_id]
+    initial_position = initial_placement.translation.copy()
+    initial_rotation = initial_placement.rotation.copy()
     initial_obstacle_distance = minimum_arm_obstacle_distance(
-        panda, PANDA_HOME, obstacle_center, config.obstacle.radius
+        panda, initial_state[:7], obstacle_center, config.obstacle.radius
     )
     if initial_obstacle_distance.distance <= config.obstacle.safety_margin:
         raise ValueError(
@@ -276,18 +301,38 @@ def solve_reaching_problem(
         [running_model] * config.trajectory.horizon_steps,
         terminal_model,
     )
-    initial_states = [initial_state.copy() for _ in range(problem.T + 1)]
-    initial_controls = problem.quasiStatic(initial_states[:-1])
-    solver = crocoddyl.SolverBoxFDDP(problem)
+    if warm_start_states is None:
+        initial_states = [initial_state.copy() for _ in range(problem.T + 1)]
+    else:
+        state_guess = np.asarray(warm_start_states, dtype=float)
+        if state_guess.shape != (problem.T + 1, 14):
+            raise ValueError("warm_start_states have unexpected dimensions")
+        initial_states = [value.copy() for value in state_guess]
+        initial_states[0] = initial_state.copy()
+
+    if warm_start_controls is None:
+        initial_controls = problem.quasiStatic(initial_states[:-1])
+    else:
+        control_guess = np.asarray(warm_start_controls, dtype=float)
+        if control_guess.shape != (problem.T, 7):
+            raise ValueError("warm_start_controls have unexpected dimensions")
+        initial_controls = [value.copy() for value in control_guess]
+    solver = solver_types[solver_kind](problem)
     solver.th_stop = config.reaching.stopping_threshold
     solver_logger = crocoddyl.CallbackLogger()
     solver.setCallbacks([solver_logger])
+    solver_initial_states = (
+        problem.rollout(initial_controls) if solver_kind == "ilqr" else initial_states
+    )
+    initial_guess_is_feasible = solver_kind == "ilqr"
+    solve_start = perf_counter()
     converged = solver.solve(
-        initial_states,
+        solver_initial_states,
         initial_controls,
         config.reaching.max_iterations,
-        False,
+        initial_guess_is_feasible,
     )
+    solve_time_seconds = perf_counter() - solve_start
 
     states = np.asarray(solver.xs).copy()
     controls = np.asarray(solver.us).copy()
@@ -319,6 +364,8 @@ def solve_reaching_problem(
     upper_margins = model.upperPositionLimit - states[:, :7]
     maximum_torque_ratio = float(np.max(np.abs(controls) / torque_limits))
     solution = ReachingSolution(
+        solver_name=solver_kind,
+        solve_time_seconds=solve_time_seconds,
         states=states,
         controls=controls,
         feedback_gains=feedback_gains,

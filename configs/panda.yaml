@@ -51,3 +51,8 @@ obstacle:
   radius: 0.02
   safety_margin: 0.005
   soft_constraint_buffer: 0.006
+
+mpc:
+  horizon_steps: 25
+  simulation_steps: 25
+  max_iterations: 5

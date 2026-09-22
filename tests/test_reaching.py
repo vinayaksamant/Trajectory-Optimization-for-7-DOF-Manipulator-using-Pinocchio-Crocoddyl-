@@ -2,6 +2,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from panda_trajopt.collision import minimum_arm_obstacle_distance
 from panda_trajopt.config import load_config
@@ -46,6 +47,8 @@ def test_box_fddp_reaching_solution_is_valid() -> None:
     solution = solve_reaching_problem(panda, config)
 
     solution.validate()
+    assert solution.solver_name == "box_fddp"
+    assert solution.solve_time_seconds > 0.0
     assert solution.states.shape == (config.trajectory.horizon_steps + 1, 14)
     assert solution.controls.shape == (config.trajectory.horizon_steps, 7)
     assert solution.feedback_gains.shape == (config.trajectory.horizon_steps, 7, 14)
@@ -72,3 +75,11 @@ def test_box_fddp_reaching_solution_is_valid() -> None:
         for fraction in np.linspace(0.0, 1.0, 21)
     ]
     assert min(direct_path_distances) < 0.0
+
+
+def test_unknown_solver_is_rejected() -> None:
+    config = load_config(ROOT / "configs" / "panda.yaml")
+    panda = load_panda_arm(config.robot)
+
+    with pytest.raises(ValueError, match="Unknown solver"):
+        solve_reaching_problem(panda, config, solver_kind="not-a-solver")

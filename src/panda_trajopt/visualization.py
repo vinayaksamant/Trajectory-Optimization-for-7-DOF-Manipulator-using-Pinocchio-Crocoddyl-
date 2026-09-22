@@ -33,6 +33,13 @@ class MuJoCoPathOverlay:
             raise ValueError("planned_color must contain RGBA values")
         self.executed_path: list[np.ndarray] = []
 
+    def set_planned_path(self, planned_path: np.ndarray) -> None:
+        """Replace the displayed prediction with the newest MPC horizon."""
+        path = np.asarray(planned_path, dtype=float)
+        if path.ndim != 2 or path.shape[1] != 3 or not np.all(np.isfinite(path)):
+            raise ValueError("planned_path must have shape (N, 3) and contain finite values")
+        self.planned_path = path.copy()
+
     def add_executed_point(self, position: np.ndarray) -> None:
         point = np.asarray(position, dtype=float).copy()
         if point.shape != (3,) or not np.all(np.isfinite(point)):
