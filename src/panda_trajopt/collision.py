@@ -35,11 +35,29 @@ def _distance_with_data(
         configuration,
     )
     obstacle_transform = coal.Transform3s(np.eye(3), obstacle_center)
+    world_centers = np.asarray(
+        [
+            placement.rotation @ local_center + placement.translation
+            for placement, local_center in zip(
+                geometry_data.oMg,
+                panda.collision_bounding_centers,
+                strict=True,
+            )
+        ]
+    )
+    lower_bounds = (
+        np.linalg.norm(world_centers - obstacle_center, axis=1)
+        - panda.collision_bounding_radii
+        - float(obstacle_geometry.radius)
+    )
     minimum_distance = np.inf
     closest_name = ""
-    for geometry, placement in zip(
-        panda.collision_model.geometryObjects, geometry_data.oMg, strict=True
-    ):
+    for sorted_index in np.argsort(lower_bounds):
+        index = int(sorted_index)
+        if lower_bounds[index] >= minimum_distance:
+            break
+        geometry = panda.collision_model.geometryObjects[index]
+        placement = geometry_data.oMg[index]
         result = coal.DistanceResult()
         robot_transform = coal.Transform3s(placement.rotation, placement.translation)
         distance = coal.distance(

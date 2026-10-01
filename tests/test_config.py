@@ -23,9 +23,9 @@ def test_default_config_describes_seven_dof_arm() -> None:
     assert len(config.reaching.target_position) == 3
     assert len(config.obstacle.center_position) == 3
     assert config.obstacle.activation_distance == pytest.approx(0.011)
-    assert config.mpc.horizon_steps == 25
-    assert config.mpc.simulation_steps == 25
-    assert config.mpc.max_iterations == 5
+    assert config.mpc.horizon_steps == 10
+    assert config.mpc.simulation_steps == 100
+    assert config.mpc.max_iterations == 2
 
 
 def test_config_rejects_wrong_arm_joint_count(tmp_path: Path) -> None:

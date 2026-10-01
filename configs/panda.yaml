@@ -53,6 +53,6 @@ obstacle:
   soft_constraint_buffer: 0.006
 
 mpc:
-  horizon_steps: 25
-  simulation_steps: 25
-  max_iterations: 5
+  horizon_steps: 10
+  simulation_steps: 100
+  max_iterations: 2

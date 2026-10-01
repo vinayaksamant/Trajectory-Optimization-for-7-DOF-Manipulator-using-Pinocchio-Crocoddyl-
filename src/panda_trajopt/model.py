@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from panda_trajopt.config import RobotConfig
 
 
@@ -15,6 +17,8 @@ class PandaModel:
     collision_model: object
     visual_model: object
     end_effector_frame_id: int
+    collision_bounding_centers: np.ndarray
+    collision_bounding_radii: np.ndarray
 
 
 def load_panda_arm(config: RobotConfig) -> PandaModel:
@@ -52,6 +56,12 @@ def load_panda_arm(config: RobotConfig) -> PandaModel:
     )
     collision_model, visual_model = geometry_models
 
+    bounding_centers: list[np.ndarray] = []
+    bounding_radii: list[float] = []
+    for geometry_object in collision_model.geometryObjects:
+        geometry_object.geometry.computeLocalAABB()
+        bounding_centers.append(np.asarray(geometry_object.geometry.aabb_center).copy())
+        bounding_radii.append(float(geometry_object.geometry.aabb_radius))
     actual_arm_joints = tuple(name for name in config.arm_joint_names if model.existJointName(name))
     if actual_arm_joints != config.arm_joint_names or model.nq != 7 or model.nv != 7:
         raise ValueError(
@@ -71,4 +81,6 @@ def load_panda_arm(config: RobotConfig) -> PandaModel:
         collision_model=collision_model,
         visual_model=visual_model,
         end_effector_frame_id=model.getFrameId(config.end_effector_frame),
+        collision_bounding_centers=np.asarray(bounding_centers),
+        collision_bounding_radii=np.asarray(bounding_radii),
     )

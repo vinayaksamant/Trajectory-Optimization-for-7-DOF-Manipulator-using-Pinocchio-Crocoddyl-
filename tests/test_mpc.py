@@ -53,6 +53,10 @@ def test_box_fddp_mpc_replans_from_mujoco_state() -> None:
     assert result.solver_name == "box_fddp"
     assert result.states.shape == (config.mpc.simulation_steps + 1, 14)
     assert result.controls.shape == (config.mpc.simulation_steps, 7)
+    assert result.external_torques.shape == (config.mpc.simulation_steps, 7)
+    assert result.grasp_center_positions.shape == (config.mpc.simulation_steps + 1, 3)
+    assert result.target_positions.shape == (config.mpc.simulation_steps + 1, 3)
+    assert result.goal_errors.shape == (config.mpc.simulation_steps + 1,)
     assert result.replan_times.shape == (config.mpc.simulation_steps,)
     assert result.solver_iterations.shape == (config.mpc.simulation_steps,)
     assert result.solver_converged.shape == (config.mpc.simulation_steps,)

@@ -144,3 +144,28 @@ def test_arm_state_rejects_invalid_shape_and_limits() -> None:
         simulation.set_arm_state(np.zeros(6), np.zeros(7))
     with pytest.raises(ValueError, match="joint limits"):
         simulation.set_arm_state(np.full(7, 100.0), np.zeros(7))
+
+
+def test_mujoco_broad_phase_preserves_exact_distance() -> None:
+    import mujoco
+
+    simulation = load_panda_simulation(
+        obstacle_position=[0.5, 0.04, 0.56],
+        obstacle_radius=0.03,
+    )
+    obstacle_id = mujoco.mj_name2id(simulation.model, mujoco.mjtObj.mjOBJ_GEOM, "reaching_obstacle")
+    brute_force_distance = min(
+        mujoco.mj_geomDistance(
+            simulation.model,
+            simulation.data,
+            int(geom_id),
+            obstacle_id,
+            10.0,
+            None,
+        )
+        for geom_id in simulation.robot_geom_ids
+    )
+
+    assert simulation.minimum_robot_obstacle_distance() == pytest.approx(
+        brute_force_distance, abs=1e-12
+    )

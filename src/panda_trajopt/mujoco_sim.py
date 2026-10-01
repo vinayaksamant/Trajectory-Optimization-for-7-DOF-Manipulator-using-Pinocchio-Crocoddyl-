@@ -166,6 +166,7 @@ class PandaSimulation:
     arm_qpos_ids: np.ndarray
     arm_dof_ids: np.ndarray
     arm_actuator_ids: np.ndarray
+    robot_geom_ids: np.ndarray
 
     def reset_home(self) -> None:
         import mujoco
@@ -175,6 +176,7 @@ class PandaSimulation:
             raise ValueError("The Panda model does not contain the 'home' keyframe")
         mujoco.mj_resetDataKeyframe(self.model, self.data, home_id)
         self.data.ctrl[self.arm_actuator_ids] = 0.0
+        self.data.qfrc_applied[self.arm_dof_ids] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
     @property
@@ -217,6 +219,53 @@ class PandaSimulation:
         self.data.ctrl[self.arm_actuator_ids] = applied
         return applied
 
+    def set_external_arm_torques(self, torques: Sequence[float]) -> None:
+        """Apply an unmodelled joint disturbance independently of actuator control."""
+        torque_array = np.asarray(torques, dtype=float)
+        if torque_array.shape != (7,) or not np.all(np.isfinite(torque_array)):
+            raise ValueError("External arm torques must contain seven finite values")
+        self.data.qfrc_applied[self.arm_dof_ids] = torque_array
+
+    def set_target_position(self, position: Sequence[float]) -> None:
+        """Move the non-colliding goal marker to a world-frame position."""
+        import mujoco
+
+        target = np.asarray(position, dtype=float)
+        if target.shape != (3,) or not np.all(np.isfinite(target)):
+            raise ValueError("Target position must contain three finite values")
+        target_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "reaching_target")
+        if target_id < 0:
+            raise ValueError("The MuJoCo scene does not contain the reaching target")
+        self.model.geom_pos[target_id] = target
+        mujoco.mj_forward(self.model, self.data)
+
+    def apply_dynamics_mismatch(
+        self,
+        *,
+        payload_mass: float = 0.0,
+        joint_friction: float = 0.0,
+        damping_scale: float = 1.0,
+    ) -> None:
+        """Alter only MuJoCo dynamics to test robustness to modelling errors."""
+        import mujoco
+
+        values = np.array([payload_mass, joint_friction, damping_scale], dtype=float)
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Dynamics-mismatch values must be finite")
+        if payload_mass < 0 or joint_friction < 0 or damping_scale <= 0:
+            raise ValueError("Payload/friction cannot be negative and damping must be positive")
+        hand_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "hand")
+        if hand_id < 0:
+            raise ValueError("The MuJoCo Panda model does not contain the hand body")
+
+        self.model.body_mass[hand_id] += payload_mass
+        payload_radius = 0.04
+        self.model.body_inertia[hand_id] += 0.4 * payload_mass * payload_radius**2
+        self.model.dof_frictionloss[self.arm_dof_ids] += joint_friction
+        self.model.dof_damping[self.arm_dof_ids] *= damping_scale
+        mujoco.mj_setConst(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)
+
     def gravity_compensation_torques(self) -> np.ndarray:
         """Return MuJoCo's current bias forces for the seven arm joints."""
         import mujoco
@@ -231,22 +280,25 @@ class PandaSimulation:
         obstacle_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "reaching_obstacle")
         if obstacle_id < 0:
             raise ValueError("The MuJoCo scene does not contain the reaching obstacle")
-        robot_geom_ids = np.flatnonzero(self.model.geom_bodyid != 0)
-        if robot_geom_ids.size == 0:
+        if self.robot_geom_ids.size == 0:
             raise ValueError("The MuJoCo scene does not contain robot collision geometry")
-        return float(
-            min(
-                mujoco.mj_geomDistance(
-                    self.model,
-                    self.data,
-                    int(geom_id),
-                    obstacle_id,
-                    10.0,
-                    None,
-                )
-                for geom_id in robot_geom_ids
-            )
+        obstacle_center = self.data.geom_xpos[obstacle_id]
+        obstacle_radius = self.model.geom_rbound[obstacle_id]
+        lower_bounds = (
+            np.linalg.norm(self.data.geom_xpos[self.robot_geom_ids] - obstacle_center, axis=1)
+            - self.model.geom_rbound[self.robot_geom_ids]
+            - obstacle_radius
         )
+        minimum_distance = np.inf
+        for local_index in np.argsort(lower_bounds):
+            if lower_bounds[local_index] >= minimum_distance:
+                break
+            geom_id = int(self.robot_geom_ids[local_index])
+            minimum_distance = min(
+                minimum_distance,
+                mujoco.mj_geomDistance(self.model, self.data, geom_id, obstacle_id, 10.0, None),
+            )
+        return float(minimum_distance)
 
     def step(self) -> None:
         import mujoco
@@ -330,8 +382,15 @@ def load_panda_simulation(
 
     arm_dof_ids = model.jnt_dofadr[arm_joint_ids].copy()
     arm_qpos_ids = model.jnt_qposadr[arm_joint_ids].copy()
+    robot_geom_ids = np.flatnonzero(model.geom_bodyid != 0)
     simulation = PandaSimulation(
-        model, data, arm_joint_ids, arm_qpos_ids, arm_dof_ids, arm_actuator_ids
+        model,
+        data,
+        arm_joint_ids,
+        arm_qpos_ids,
+        arm_dof_ids,
+        arm_actuator_ids,
+        robot_geom_ids,
     )
     simulation.reset_home()
     return simulation
